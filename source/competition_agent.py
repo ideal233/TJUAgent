@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from models import create_policy
 import gym
+import random
 
 DEFAULT_FEATURE_CONFIG = {
     'recode_agents': True,
@@ -116,15 +117,19 @@ class TjuAgent(BaseAgent):
         super(TjuAgent, self).__init__( *args, **kwargs)
         torch.set_num_threads(1)
         device = torch.device("cpu")
-        model_path0 = './agent_models/0.pt'
-        model_path1 = './agent_models/1.pt'
-        model_path2 = './agent_models/2.pt'
-        model_path3 = './agent_models/3.pt'
+        model_path0 = './best_models/0.pt'
+        model_path1 = './best_models/1.pt'
+        # model_path1 = './best_models/1.pt'
+        model_path2 = './best_models/2.pt'
+        model_path3 = './best_models/3.pt'
+        # model_path3 = './best_models/3.pt'
         bs = 11
         channels = get_feature_channels(DEFAULT_FEATURE_CONFIG)
         obs_unflat = get_unflat_obs_space(channels, bs, DEFAULT_FEATURE_CONFIG['rescale'])
         min_flat_obs = np.concatenate([obs_unflat.spaces[0].low.flatten(), obs_unflat.spaces[1].low])
         max_flat_obs = np.concatenate([obs_unflat.spaces[0].high.flatten(), obs_unflat.spaces[1].high])
+        self.recent_states = []
+        self.list_len = 20
         self.observation_space = gym.spaces.Box(min_flat_obs, max_flat_obs)
         self.action_space = gym.spaces.Discrete(6)
         self.state_dict0, self.ob_rms0 = torch.load(model_path0)
@@ -178,29 +183,38 @@ class TjuAgent(BaseAgent):
 
     def act(self, obs, action_space):
         agent_id = self._get_id(obs)
+
+        self.recent_states.append(featurize(obs, agent_id, DEFAULT_FEATURE_CONFIG))
+        if len(self.recent_states) > self.list_len:
+            del self.recent_states[0]
+        stateset = self._toset(self.recent_states)
+
         obs = self._preprocess(obs, agent_id)
-        print('current id:', agent_id)
-        assert agent_id in [0, 1, 2, 3]
+        #print('current id:', agent_id)
+        #assert agent_id in [0, 1, 2, 3]
         with torch.no_grad():
             if agent_id == 0:
-                print('using policy 0')
+                #print('using policy 0')
                 value, action, _ = self.actor_critic0.act(obs, deterministic=True)
             elif agent_id == 1:
-                print('using policy 1')
+                #print('using policy 1')
                 value, action, _ = self.actor_critic1.act(obs, deterministic=True)
             elif agent_id == 2:
-                print('using policy 2')
+                #print('using policy 2')
                 value, action, _ = self.actor_critic2.act(obs, deterministic=True)
             elif agent_id == 3:
-                print('using policy 3')
+                #print('using policy 3')
                 value, action, _ = self.actor_critic3.act(obs, deterministic=True)
+        #print(len(stateset))
+        if len(self.recent_states) == self.list_len and len(stateset) <= 3:
+            action = [[random.randint(1, 5)]]
 
         return int(np.array(action)[0][0])
 
     def _get_id(self, obs):
         teammate = obs["teammate"]
         teammate_value = teammate.value
-        assert teammate_value in [10, 11, 12, 13]
+        #assert teammate_value in [10, 11, 12, 13]
         teammate_id = teammate_value - 10
         if teammate_id == 0:
             return 2
@@ -214,4 +228,9 @@ class TjuAgent(BaseAgent):
     def _preprocess(self, obs, agent_id):
         return torch.from_numpy(np.array([featurize(obs, agent_id, DEFAULT_FEATURE_CONFIG)])).float()
 
+    def _toset(self, list):
+        s = set()
+        for state in list:
+            s.add(tuple(state))
+        return s
 
